@@ -1,0 +1,7 @@
+[package]
+name = "water_buffer"
+version = "0.1.0"
+edition = "2024"
+
+[dev-dependencies]
+bytes = "1.11.0"
