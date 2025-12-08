@@ -202,7 +202,8 @@ pub struct WaterBuffer<T> {
     start_pos: usize,            // Start position for advance operations
     pointer: *mut T,             // Raw pointer to data
     iterator_pos: usize,         // Iterator state
-    filled_data_length: usize,   // Number of valid bytes
+    filled_data_length
+: usize,   // Number of valid bytes
 }
 ```
 

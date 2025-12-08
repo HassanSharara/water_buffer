@@ -11,11 +11,14 @@ type InnerType = u8;
 
 /// Main dynamic buffer struct
 pub struct WaterBuffer<T> {
-    cap: usize,
-    start_pos: usize,
-    pointer: *mut T,
-    filled_data_length: usize,
+    pub cap: usize,
+    pub start_pos: usize,
+    pub pointer: *mut T,
+    pub filled_data_length
+: usize,
 }
+
+
 
 impl WaterBuffer<InnerType> {
     /// Converts the buffer into an owned iterator
@@ -47,7 +50,8 @@ impl WaterBuffer<InnerType> {
             cap,
             pointer: first_element_pointer,
             start_pos: 0,
-            filled_data_length: 0,
+            filled_data_length
+: 0,
         }
     }
 
@@ -67,7 +71,7 @@ impl WaterBuffer<InnerType> {
 
     /// Calculates an appropriate size for buffer growth
     #[inline(always)]
-    const fn ap_size(&self, len: usize) -> usize {
+    pub(crate) const  fn ap_size(&self, len: usize) -> usize {
         let re = self.cap + (self.cap / 2);
         if len > re {
             return len;
@@ -75,16 +79,44 @@ impl WaterBuffer<InnerType> {
         re
     }
 
+    #[cfg(feature = "do-not-expand")]
+    /// Extends the buffer from a slice
+    #[inline(always)]
+    pub fn extend_from_slice(&mut self,mut slice: &[u8]) {
+        let mut to_write =  slice.len();
+        let mut position_to_write = self.start_pos;
+        while to_write > 0  {
+            let  rem = self.un_initialized_remaining();
+            let new_slice = &slice[..rem.min(to_write)];
+            unsafe{ptr::copy_nonoverlapping(
+                new_slice.as_ptr(),
+                self.pointer.add(position_to_write),
+                new_slice.len())};
+            to_write -= new_slice.len();
+            self.filled_data_length += new_slice.len();
+            position_to_write += new_slice.len();
+            if position_to_write >= self.cap {
+                position_to_write = 0;
+                self.start_pos = 0;
+            }
+            slice = &slice[new_slice.len()..];
+        }
+        self.start_pos = position_to_write;
+    }
+
+    #[cfg(not(feature = "do-not-expand"))]
     /// Extends the buffer from a slice
     #[inline(always)]
     pub fn extend_from_slice(&mut self, slice: &[u8]) {
-        if self.filled_data_length + slice.len() > self.cap {
-            self.expand(self.ap_size(self.filled_data_length + slice.len()));
+
+        let t = self.filled_data_length + slice.len();
+        if t> self.cap {
+            self.expand(self.ap_size(t));
         }
         unsafe {
             ptr::copy_nonoverlapping(
                 slice.as_ptr(),
-                self.pointer.add(self.filled_data_length) as *mut u8,
+                self.pointer.add(self.start_pos + self.filled_data_length) as *mut u8,
                 slice.len(),
             )
         };
@@ -94,30 +126,42 @@ impl WaterBuffer<InnerType> {
     /// Returns the number of elements in the buffer
     #[inline(always)]
     pub const fn len(&self) -> usize {
+        #[cfg(feature = "do-not-expand")]
+        {
+            if self.filled_data_length >= self.cap {
+                return self.cap;
+            }
+        }
         self.filled_data_length
+
     }
 
     /// Resets the buffer
     #[inline(always)]
     pub const fn reset(&mut self) {
-        self.filled_data_length = 0;
+        self.filled_data_length
+ = 0;
         self.start_pos = 0;
     }
 
     /// Pushes a single element into the buffer
     #[inline]
     pub fn push(&mut self, item: InnerType) {
-        if self.filled_data_length >= self.cap {
-            self.expand(self.ap_size(self.filled_data_length + 1));
+        if self.filled_data_length
+ >= self.cap {
+            self.expand(self.ap_size(self.filled_data_length
+ + 1));
         }
         unsafe {
             ptr::copy_nonoverlapping(
                 &item,
-                self.pointer.add(self.filled_data_length),
+                self.pointer.add(self.filled_data_length
+),
                 1,
             );
         }
-        self.filled_data_length += 1;
+        self.filled_data_length
+ += 1;
     }
 
     #[inline(always)]
@@ -127,22 +171,50 @@ impl WaterBuffer<InnerType> {
 
     #[inline(always)]
     pub const fn advance(&mut self, n: usize) {
-        if n > self.filled_data_length {
+        if n > self.filled_data_length
+           {
             panic!("Insufficient space to advance");
-        }
+          }
         self.start_pos += n;
         self.filled_data_length -= n;
     }
 
     #[inline(always)]
     pub const fn remaining(&self) -> usize {
-        self.filled_data_length - self.start_pos
+        self.len()
+    }
+
+    #[cfg(feature = "do-not-expand")]
+    #[inline(always)]
+    pub const fn un_initialized_remaining(&self) -> usize {
+        self.cap - (self.cap + self.filled_data_length) % self.cap
+
+    }
+    #[cfg(not(feature = "do-not-expand"))]
+    #[inline(always)]
+    pub const fn un_initialized_remaining(&self) -> usize {
+        self.cap - self.filled_data_length
+
+    }
+
+    #[inline(always)]
+    pub const fn chunk_mut(&mut self) -> &mut [u8] {
+        unsafe {
+            let pos = self.start_pos + self.filled_data_length
+;
+            let pointer = self.pointer.add(pos);
+            std::slice::from_raw_parts_mut(pointer, self.cap - pos)
+        }
     }
 
     #[inline(always)]
     pub const fn advance_mut(&mut self, n: usize) {
-        self.start_pos += n;
+        self.filled_data_length
+ += n;
     }
+
+
+
 }
 
 impl Into<WaterBufferOwnedIter<InnerType>> for WaterBuffer<InnerType> {
@@ -177,7 +249,8 @@ impl Iterator for WaterBufferOwnedIter<InnerType> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let current = self.iterator_pos;
-        if current + 1 > self.buffer.filled_data_length {
+        if current + 1 > self.buffer.filled_data_length
+ {
             self.iterator_pos = 0;
             return None;
         }
@@ -202,6 +275,12 @@ impl<'a> Iterator for WaterBufferIter<'a> {
     type Item = &'a u8;
 
     fn next(&mut self) -> Option<Self::Item> {
+        #[cfg(feature = "do-not-expand")]
+        if self.pos >= self.buffer.cap.min(self.buffer.filled_data_length)
+        {
+            return None;
+        }
+        #[cfg(not(feature = "do-not-expand"))]
         if self.pos >= self.buffer.filled_data_length {
             return None;
         }
@@ -215,9 +294,17 @@ impl<'a> Iterator for WaterBufferIterMut<'a> {
     type Item = &'a mut u8;
 
     fn next(&mut self) -> Option<Self::Item> {
+
+        #[cfg(feature = "do-not-expand")]
+        if self.pos >= self.buffer.cap.min(self.buffer.filled_data_length)
+         {
+            return None;
+        }
+        #[cfg(not(feature = "do-not-expand"))]
         if self.pos >= self.buffer.filled_data_length {
             return None;
         }
+
         let item = unsafe { &mut *self.buffer.pointer.add(self.pos) };
         self.pos += 1;
         Some(item)
@@ -229,7 +316,8 @@ impl<T> Index<Range<usize>> for WaterBuffer<T> {
     type Output = [T];
 
     fn index(&self, idx: Range<usize>) -> &Self::Output {
-        if idx.start > idx.end || idx.end > self.filled_data_length {
+        if idx.start > idx.end || idx.end > self.filled_data_length
+ {
             panic!("Range out of bounds");
         }
         unsafe { std::slice::from_raw_parts(self.pointer.add(idx.start), idx.end - idx.start) }
@@ -238,9 +326,10 @@ impl<T> Index<Range<usize>> for WaterBuffer<T> {
 
 impl<T> IndexMut<Range<usize>> for WaterBuffer<T> {
     fn index_mut(&mut self, idx: Range<usize>) -> &mut Self::Output {
-        if idx.start > idx.end || idx.end > self.filled_data_length {
+        if idx.start > idx.end
+         {
             panic!("Range out of bounds");
-        }
+         }
         unsafe { std::slice::from_raw_parts_mut(self.pointer.add(idx.start), idx.end - idx.start) }
     }
 }
@@ -249,21 +338,54 @@ impl<T> Index<RangeFull> for WaterBuffer<T> {
     type Output = [T];
 
     fn index(&self, _idx: RangeFull) -> &Self::Output {
-        unsafe { std::slice::from_raw_parts(self.pointer.add(self.start_pos), self.filled_data_length) }
+        #[cfg(feature = "do-not-expand")]
+         unsafe {
+            if self.filled_data_length > self.cap {
+               return std::slice::from_raw_parts(self.pointer,self.cap)
+            }
+        };
+        unsafe { std::slice::from_raw_parts(self.pointer.add(self.start_pos), self.filled_data_length)}
     }
 }
 
 impl<T> IndexMut<RangeFull> for WaterBuffer<T> {
     fn index_mut(&mut self, _idx: RangeFull) -> &mut Self::Output {
-        unsafe { std::slice::from_raw_parts_mut(self.pointer.add(self.start_pos), self.filled_data_length) }
+        #[cfg(feature = "do-not-expand")]
+        return unsafe {
+            std::slice::from_raw_parts_mut(self.pointer.add(self.start_pos),
+                                       if self.filled_data_length > self.cap {
+                                           self.cap
+                                       } else {
+                                           self.filled_data_length
+                                       })
+        };
+        #[cfg(not(feature = "do-not-expand"))]
+        unsafe { std::slice::from_raw_parts_mut(self.pointer.add(self.start_pos), self.filled_data_length)}
     }
 }
 
 impl<T> Index<usize> for WaterBuffer<T> {
     type Output = T;
 
-    fn index(&self, index: usize) -> &Self::Output {
-        if index >= self.filled_data_length {
+    fn index(&self,
+             #[cfg(feature = "do-not-expand")]
+             mut index: usize,
+             #[cfg(not(feature = "do-not-expand"))]
+             index:  usize,
+    ) -> &Self::Output {
+
+        #[cfg(feature = "do-not-expand")]
+        {
+            while index > self.filled_data_length
+ {
+                index -= self.filled_data_length
+;
+            }
+        }
+
+        #[cfg(not(feature = "do-not-expand"))]
+        if index >= self.filled_data_length
+ {
             panic!("Index out of bounds");
         }
         unsafe { &*self.pointer.add(index) }
@@ -272,9 +394,13 @@ impl<T> Index<usize> for WaterBuffer<T> {
 
 impl<T> IndexMut<usize> for WaterBuffer<T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        if index >= self.filled_data_length {
+        if index >= self.filled_data_length
+ {
             panic!("Index out of bounds");
         }
         unsafe { &mut *self.pointer.add(index) }
     }
 }
+
+
+

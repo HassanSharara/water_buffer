@@ -1,11 +1,15 @@
 
 
 fn main() {
-    
-    let mut buf = water_buffer::WaterBuffer::with_capacity(100);
-    buf.extend_from_slice(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
-    for i in buf.iter_mut() {
-        println!("{}", i);
-    }
+    let mut buf = water_buffer::WaterBuffer::with_capacity(12);
+    buf.extend_from_slice(b"hello world over");
+    println!("{:?}",String::from_utf8_lossy(&buf[..]));
+
+
+    buf.extend_from_slice(b"over");
+    println!("{:?}",String::from_utf8_lossy(&buf[..]));
+    buf.extend_from_slice(b" hassan sharara hi");
+    println!("{:?}",String::from_utf8_lossy(&buf[..]));
+
 }

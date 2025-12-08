@@ -10,5 +10,12 @@ readme = "README.md"
 categories = ["memory-management","caching","network-programming"]
 keywords = ["buffer","water-buffer","water_buffer"]
 description = "A high-performance, zero-overhead byte buffer implementation in Rust that outperforms the industry-standard `BytesMut` by **6-11x** in most scenarios."
+
+
+
 [dev-dependencies]
 bytes = "1.11.0"
+
+
+[features]
+do-not-expand = []
