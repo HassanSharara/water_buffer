@@ -11,10 +11,12 @@ type InnerType = u8;
 
 /// Main dynamic buffer struct
 pub struct WaterBuffer<T> {
-    pub cap: usize,
-    pub start_pos: usize,
-    pub pointer: *mut T,
-    pub filled_data_length
+    pub (crate) cap: usize,
+    pub(crate) start_pos: usize,
+    #[cfg(feature = "circular_buffer")]
+    pub (crate) circular_position:Option<usize>,
+    pub (crate) pointer: *mut T,
+    pub (crate) filled_data_length
 : usize,
 }
 
@@ -46,12 +48,25 @@ impl WaterBuffer<InnerType> {
     pub fn with_capacity(cap: usize) -> WaterBuffer<InnerType> {
         let layout = Layout::array::<InnerType>(cap).unwrap();
         let first_element_pointer = unsafe { alloc(layout) } as *mut InnerType;
+        #[cfg(feature = "circular_buffer")]
+        {
+            return  WaterBuffer {
+                cap,
+                pointer: first_element_pointer,
+                start_pos: 0,
+                filled_data_length
+                : 0,
+                circular_position:None
+            };
+        };
+
+        #[cfg(not(feature = "circular_buffer"))]
         WaterBuffer {
             cap,
             pointer: first_element_pointer,
             start_pos: 0,
             filled_data_length
-: 0,
+            : 0,
         }
     }
 
@@ -69,6 +84,7 @@ impl WaterBuffer<InnerType> {
         self.cap = n;
     }
 
+    #[cfg(not(feature = "circular_buffer"))]
     /// Calculates an appropriate size for buffer growth
     #[inline(always)]
     pub(crate) const  fn ap_size(&self, len: usize) -> usize {
@@ -79,32 +95,149 @@ impl WaterBuffer<InnerType> {
         re
     }
 
-    #[cfg(feature = "do-not-expand")]
+    #[cfg(feature = "circular_buffer")]
     /// Extends the buffer from a slice
     #[inline(always)]
-    pub fn extend_from_slice(&mut self,mut slice: &[u8]) {
-        let mut to_write =  slice.len();
-        let mut position_to_write = self.start_pos;
-        while to_write > 0  {
-            let  rem = self.un_initialized_remaining();
-            let new_slice = &slice[..rem.min(to_write)];
-            unsafe{ptr::copy_nonoverlapping(
-                new_slice.as_ptr(),
-                self.pointer.add(position_to_write),
-                new_slice.len())};
-            to_write -= new_slice.len();
-            self.filled_data_length += new_slice.len();
-            position_to_write += new_slice.len();
+    pub fn extend_from_slice(&mut self,mut slice:&[u8]){
+        if self.cap == 0 {return;}
+        let mut must_write_len = slice.len();
+        while must_write_len > 0 {
+
+            let  mut position_to_write = self.circular_position.unwrap_or_else(||{
+                let filled = self.filled_data_length + self.start_pos;
+                if filled >= self.cap {
+                    self.circular_position = Some(0);
+                    return 0
+                }
+                filled
+            });
             if position_to_write >= self.cap {
                 position_to_write = 0;
-                self.start_pos = 0;
             }
-            slice = &slice[new_slice.len()..];
-        }
-        self.start_pos = position_to_write;
-    }
+            let available_len = (self.cap - position_to_write).min(must_write_len);
+            let n_slice = &slice[..available_len];
+            unsafe {
+                ptr::copy_nonoverlapping(
+                    n_slice.as_ptr(),
+                    self.pointer.add(position_to_write),
+                    n_slice.len()
+                );
+            };
 
-    #[cfg(not(feature = "do-not-expand"))]
+            if self.filled_data_length < self.cap {
+                self.filled_data_length += available_len;
+            } else {
+                if let Some(cp) = self.circular_position.as_mut() {
+                    *cp += available_len;
+                    if *cp >= self.cap {
+                        *cp = 0;
+                    }
+                } else {
+                    let mut p = position_to_write+available_len;
+                    if p >= self.cap {
+                        p = 0 ;
+                    }
+                    self.circular_position = Some(p);
+                }
+            }
+            must_write_len -= available_len;
+            slice = &slice[available_len..];
+        }
+        // let`s update filled_data
+        self.filled_data_length += slice.len();
+        if self.filled_data_length >= self.cap {
+            self.filled_data_length = self.cap;
+        }
+    }
+    // pub fn extend_from_slice(&mut self, slice: &[u8]) {
+    //     if slice.is_empty() {
+    //         return;
+    //     }
+    //
+    //     let slice_len = slice.len();
+    //     let current_len = self.len();
+    //
+    //     // If incoming data is larger than capacity, only keep the last `cap` bytes
+    //     if slice_len >= self.cap {
+    //         let offset = slice_len - self.cap;
+    //         unsafe {
+    //             ptr::copy_nonoverlapping(
+    //                 slice.as_ptr().add(offset),
+    //                 self.pointer,
+    //                 self.cap,
+    //             );
+    //         }
+    //         self.filled_data_length = self.cap;
+    //         self.circular_position = Some(0);
+    //         self.start_pos = 0;
+    //         return;
+    //     }
+    //
+    //     // Determine write position
+    //     let write_pos = if let Some(circ_pos) = self.circular_position {
+    //         circ_pos
+    //     } else if self.filled_data_length < self.cap {
+    //         self.filled_data_length
+    //     } else {
+    //         // First wrap - should not happen but handle it
+    //         self.circular_position = Some(0);
+    //         0
+    //     };
+    //
+    //     // Calculate how much space until wrap
+    //     let space_until_wrap = self.cap - write_pos;
+    //
+    //     if slice_len <= space_until_wrap {
+    //         // Simple case: no wrap needed, write everything at once
+    //         unsafe {
+    //             ptr::copy_nonoverlapping(
+    //                 slice.as_ptr(),
+    //                 self.pointer.add(write_pos),
+    //                 slice_len,
+    //             );
+    //         }
+    //
+    //         let new_pos = write_pos + slice_len;
+    //         let new_filled = current_len + slice_len;
+    //
+    //         if new_filled >= self.cap {
+    //             self.filled_data_length = self.cap;
+    //             self.circular_position = Some(if new_pos >= self.cap { 0 } else { new_pos });
+    //         } else {
+    //             self.filled_data_length = new_filled;
+    //             if self.circular_position.is_some() {
+    //                 self.circular_position = Some(new_pos);
+    //             }
+    //         }
+    //     } else {
+    //         // Complex case: need to wrap
+    //
+    //         // Write first chunk (until end of buffer)
+    //         unsafe {
+    //             ptr::copy_nonoverlapping(
+    //                 slice.as_ptr(),
+    //                 self.pointer.add(write_pos),
+    //                 space_until_wrap,
+    //             );
+    //         }
+    //
+    //         // Write second chunk (from beginning of buffer)
+    //         let remaining = slice_len - space_until_wrap;
+    //         unsafe {
+    //             ptr::copy_nonoverlapping(
+    //                 slice.as_ptr().add(space_until_wrap),
+    //                 self.pointer,
+    //                 remaining,
+    //             );
+    //         }
+    //
+    //         // Update state
+    //         self.filled_data_length = self.cap;
+    //         self.circular_position = Some(remaining);
+    //     }
+    // }
+
+    #[cfg(not(feature = "circular_buffer"))]
     /// Extends the buffer from a slice
     #[inline(always)]
     pub fn extend_from_slice(&mut self, slice: &[u8]) {
@@ -126,24 +259,70 @@ impl WaterBuffer<InnerType> {
     /// Returns the number of elements in the buffer
     #[inline(always)]
     pub const fn len(&self) -> usize {
-        #[cfg(feature = "do-not-expand")]
+        #[cfg(feature = "circular_buffer")]
         {
             if self.filled_data_length >= self.cap {
-                return self.cap;
+
+                return self.cap ;
             }
         }
         self.filled_data_length
 
     }
 
+
+    #[cfg(feature = "circular_buffer")]
+    #[inline(always)]
+    pub const fn reset(&mut self){
+        self.start_pos = 0;
+        self.filled_data_length = 0;
+        self.circular_position = None;
+    }
+    #[cfg(not(feature = "circular_buffer"))]
     /// Resets the buffer
     #[inline(always)]
     pub const fn reset(&mut self) {
-        self.filled_data_length
- = 0;
+        self.filled_data_length = 0;
         self.start_pos = 0;
+
     }
 
+
+
+    #[inline]
+    #[cfg(feature = "circular_buffer")]
+    pub fn push(&mut self, item: InnerType) {
+        if self.filled_data_length >= self.cap {
+            // let mut p = self.circular_position.unwrap_or(self.start_pos);
+            let  p = self.circular_position.as_ref().unwrap_or(&0);
+            unsafe {
+                ptr::copy_nonoverlapping(
+                    &item,
+                    self.pointer.add(*p),
+                    1,
+                );
+            }
+            let n = *p + 1;
+            self.circular_position = Some(
+                if n >= self.cap {
+                    0
+                } else { n }
+            );
+            return
+        }
+        unsafe {
+            ptr::copy_nonoverlapping(
+                &item,
+                self.pointer.add(self.filled_data_length),
+                1,
+            );
+        }
+        self.filled_data_length += 1;
+    }
+
+
+
+    #[cfg(not(feature = "circular_buffer"))]
     /// Pushes a single element into the buffer
     #[inline]
     pub fn push(&mut self, item: InnerType) {
@@ -169,6 +348,8 @@ impl WaterBuffer<InnerType> {
         self.reset();
     }
 
+
+
     #[inline(always)]
     pub const fn advance(&mut self, n: usize) {
         if n > self.filled_data_length
@@ -184,29 +365,48 @@ impl WaterBuffer<InnerType> {
         self.len()
     }
 
-    #[cfg(feature = "do-not-expand")]
+    #[cfg(feature = "circular_buffer")]
     #[inline(always)]
     pub const fn un_initialized_remaining(&self) -> usize {
-        self.cap - (self.cap + self.filled_data_length) % self.cap
+        let mut pos = self.filled_data_length;
+        if let Some(p) = self.circular_position {
+            if p > 0 {pos = p;}
+        }
+        if pos > self.cap { return  0;}
+        self.cap - pos
 
     }
-    #[cfg(not(feature = "do-not-expand"))]
+    #[cfg(not(feature = "circular_buffer"))]
     #[inline(always)]
     pub const fn un_initialized_remaining(&self) -> usize {
         self.cap - self.filled_data_length
 
     }
 
+
+    #[cfg(not(feature = "circular_buffer"))]
+
     #[inline(always)]
     pub const fn chunk_mut(&mut self) -> &mut [u8] {
         unsafe {
-            let pos = self.start_pos + self.filled_data_length
-;
+            let pos = self.start_pos + self.filled_data_length;
             let pointer = self.pointer.add(pos);
             std::slice::from_raw_parts_mut(pointer, self.cap - pos)
         }
     }
 
+    #[cfg(feature = "circular_buffer")]
+    #[inline(always)]
+    pub const fn chunk_mut(&mut self) -> &mut [u8] {
+        unsafe {
+            let pos = self.start_pos + self.filled_data_length;
+            if pos >= self.cap {
+                return  &mut [];
+            }
+            let pointer = self.pointer.add(pos);
+            std::slice::from_raw_parts_mut(pointer, self.cap - pos)
+        }
+    }
     #[inline(always)]
     pub const fn advance_mut(&mut self, n: usize) {
         self.filled_data_length
@@ -248,14 +448,18 @@ impl Iterator for WaterBufferOwnedIter<InnerType> {
     type Item = InnerType;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let current = self.iterator_pos;
-        if current + 1 > self.buffer.filled_data_length
- {
-            self.iterator_pos = 0;
+        if self.iterator_pos >= self.buffer.cap.min(self.buffer.filled_data_length)
+        {
             return None;
         }
+        #[cfg(not(feature = "circular_buffer"))]
+        if self.iterator_pos >= self.buffer.filled_data_length {
+            return None;
+        }
+
+        let item = unsafe { &*self.buffer.pointer.add(self.iterator_pos + self.buffer.start_pos) };
         self.iterator_pos += 1;
-        Some(self.buffer[current])
+        Some(*item)
     }
 }
 
@@ -275,16 +479,17 @@ impl<'a> Iterator for WaterBufferIter<'a> {
     type Item = &'a u8;
 
     fn next(&mut self) -> Option<Self::Item> {
-        #[cfg(feature = "do-not-expand")]
+        #[cfg(feature = "circular_buffer")]
         if self.pos >= self.buffer.cap.min(self.buffer.filled_data_length)
         {
             return None;
         }
-        #[cfg(not(feature = "do-not-expand"))]
+        #[cfg(not(feature = "circular_buffer"))]
         if self.pos >= self.buffer.filled_data_length {
             return None;
         }
-        let item = unsafe { &*self.buffer.pointer.add(self.pos) };
+
+        let item = unsafe { &*self.buffer.pointer.add(self.pos + self.buffer.start_pos) };
         self.pos += 1;
         Some(item)
     }
@@ -295,17 +500,17 @@ impl<'a> Iterator for WaterBufferIterMut<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
 
-        #[cfg(feature = "do-not-expand")]
+        #[cfg(feature = "circular_buffer")]
         if self.pos >= self.buffer.cap.min(self.buffer.filled_data_length)
          {
             return None;
         }
-        #[cfg(not(feature = "do-not-expand"))]
+        #[cfg(not(feature = "circular_buffer"))]
         if self.pos >= self.buffer.filled_data_length {
             return None;
         }
 
-        let item = unsafe { &mut *self.buffer.pointer.add(self.pos) };
+        let item = unsafe { &mut *self.buffer.pointer.add(self.pos + self.buffer.start_pos) };
         self.pos += 1;
         Some(item)
     }
@@ -338,7 +543,7 @@ impl<T> Index<RangeFull> for WaterBuffer<T> {
     type Output = [T];
 
     fn index(&self, _idx: RangeFull) -> &Self::Output {
-        #[cfg(feature = "do-not-expand")]
+        #[cfg(feature = "circular_buffer")]
          unsafe {
             if self.filled_data_length > self.cap {
                return std::slice::from_raw_parts(self.pointer,self.cap)
@@ -350,7 +555,7 @@ impl<T> Index<RangeFull> for WaterBuffer<T> {
 
 impl<T> IndexMut<RangeFull> for WaterBuffer<T> {
     fn index_mut(&mut self, _idx: RangeFull) -> &mut Self::Output {
-        #[cfg(feature = "do-not-expand")]
+        #[cfg(feature = "circular_buffer")]
         return unsafe {
             std::slice::from_raw_parts_mut(self.pointer.add(self.start_pos),
                                        if self.filled_data_length > self.cap {
@@ -359,7 +564,7 @@ impl<T> IndexMut<RangeFull> for WaterBuffer<T> {
                                            self.filled_data_length
                                        })
         };
-        #[cfg(not(feature = "do-not-expand"))]
+        #[cfg(not(feature = "circular_buffer"))]
         unsafe { std::slice::from_raw_parts_mut(self.pointer.add(self.start_pos), self.filled_data_length)}
     }
 }
@@ -368,13 +573,13 @@ impl<T> Index<usize> for WaterBuffer<T> {
     type Output = T;
 
     fn index(&self,
-             #[cfg(feature = "do-not-expand")]
+             #[cfg(feature = "circular_buffer")]
              mut index: usize,
-             #[cfg(not(feature = "do-not-expand"))]
+             #[cfg(not(feature = "circular_buffer"))]
              index:  usize,
     ) -> &Self::Output {
 
-        #[cfg(feature = "do-not-expand")]
+        #[cfg(feature = "circular_buffer")]
         {
             while index > self.filled_data_length
  {
@@ -383,7 +588,7 @@ impl<T> Index<usize> for WaterBuffer<T> {
             }
         }
 
-        #[cfg(not(feature = "do-not-expand"))]
+        #[cfg(not(feature = "circular_buffer"))]
         if index >= self.filled_data_length
  {
             panic!("Index out of bounds");
@@ -401,6 +606,3 @@ impl<T> IndexMut<usize> for WaterBuffer<T> {
         unsafe { &mut *self.pointer.add(index) }
     }
 }
-
-
-

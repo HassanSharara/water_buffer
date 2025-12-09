@@ -1,6 +1,5 @@
-mod not_expand;
-
-#[cfg(all(test, not(feature = "do-not-expand")))]
+pub (crate) mod not_expand;
+#[cfg(test)]
 mod tests {
     use super::super::*;
 
@@ -440,6 +439,7 @@ mod tests {
         assert_eq!(&b[..], b"ABCDE");
     }
 
+    #[cfg(not(feature = "circular_buffer"))]
     #[test]
     fn test_ap_size() {
         let b = WaterBuffer::with_capacity(10);

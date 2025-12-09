@@ -18,4 +18,7 @@ bytes = "1.11.0"
 
 
 [features]
-do-not-expand = []
+circular_buffer = []
+
+[package.metadata]
+unstable-features = ["circular_buffer"]
