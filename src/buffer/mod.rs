@@ -4,7 +4,7 @@
 //! It provides safe memory management, dynamic resizing, iteration, and indexing.  
 
 use std::alloc::{alloc, dealloc, realloc, Layout};
-use std::ops::{Index, IndexMut, Range, RangeFull};
+use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFull};
 use std::ptr;
 
 type InnerType = u8;
@@ -23,6 +23,20 @@ pub struct WaterBuffer<T> {
 
 
 unsafe impl<T> Send for WaterBuffer<T> {}
+
+impl<T> Deref for WaterBuffer<T> {
+    type Target = [T];
+
+    fn deref(&self) -> &Self::Target {
+        &self[..]
+    }
+}
+
+impl<T> DerefMut for WaterBuffer<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self[..]
+    }
+}
 impl WaterBuffer<InnerType> {
     /// Converts the buffer into an owned iterator
     pub fn into_owned_iter(self) -> WaterBufferOwnedIter<InnerType> {
