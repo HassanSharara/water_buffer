@@ -4,8 +4,13 @@
 //! It provides safe memory management, dynamic resizing, iteration, and indexing.  
 
 use std::alloc::{alloc, dealloc, realloc, Layout};
+use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFull};
 use std::ptr;
+#[cfg(feature = "impl_bytes")]
+use bytes::buf::UninitSlice;
+#[cfg(feature = "impl_bytes")]
+use bytes::BufMut;
 
 type InnerType = u8;
 
@@ -21,7 +26,21 @@ pub struct WaterBuffer<T> {
 : usize,
 }
 
+#[cfg(feature = "impl_bytes")]
 
+unsafe impl BufMut for WaterBuffer<u8> {
+    fn remaining_mut(&self) -> usize {
+        self.len()
+    }
+
+    unsafe fn advance_mut(&mut self, cnt: usize) {
+        self.advance_mut(cnt)
+    }
+
+    fn chunk_mut(&mut self) -> &mut UninitSlice {
+        UninitSlice::uninit(self.chunk_mut_maybeunint())
+    }
+}
 unsafe impl<T> Send for WaterBuffer<T> {}
 
 impl<T> Deref for WaterBuffer<T> {
@@ -398,6 +417,16 @@ impl WaterBuffer<InnerType> {
 
     }
 
+    #[cfg(not(feature = "circular_buffer"))]
+    #[inline(always)]
+    // Make the function generic over T
+    pub const fn chunk_mut_maybeunint<T>(&mut self) -> &mut [MaybeUninit<T>] {
+        unsafe {
+            let pos = self.start_pos + self.filled_data_length;
+            let pointer = self.pointer.add(pos) as *mut MaybeUninit<T>;
+            std::slice::from_raw_parts_mut(pointer, self.cap - pos)
+        }
+    }
 
     #[cfg(not(feature = "circular_buffer"))]
 
@@ -410,6 +439,19 @@ impl WaterBuffer<InnerType> {
         }
     }
 
+
+    #[cfg(all(feature = "circular_buffer"))]
+    #[inline(always)]
+    pub const fn chunk_mut_maybeunint<T>(&mut self) -> &mut [MaybeUninit<T>] {
+        unsafe {
+            let pos = self.start_pos + self.filled_data_length;
+            if pos >= self.cap {
+                return  &mut [];
+            }
+            let pointer = self.pointer.add(pos) as *mut MaybeUninit<T>;
+            std::slice::from_raw_parts_mut(pointer, self.cap - pos)
+        }
+    }
     #[cfg(feature = "circular_buffer")]
     #[inline(always)]
     pub const fn chunk_mut(&mut self) -> &mut [u8] {
