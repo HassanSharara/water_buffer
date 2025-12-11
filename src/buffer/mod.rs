@@ -452,6 +452,13 @@ impl WaterBuffer<InnerType> {
             std::slice::from_raw_parts_mut(pointer, self.cap - pos)
         }
     }
+
+    #[inline(always)]
+    pub  const fn chunk(&self)->&[u8]{
+        unsafe {
+            std::slice::from_raw_parts(self.pointer,self.filled_data_length)
+        }
+    }
     #[cfg(feature = "circular_buffer")]
     #[inline(always)]
     pub const fn chunk_mut(&mut self) -> &mut [u8] {
