@@ -9,6 +9,7 @@ use std::ptr;
 
 type InnerType = u8;
 
+
 /// Main dynamic buffer struct
 pub struct WaterBuffer<T> {
     pub (crate) cap: usize,
@@ -21,7 +22,7 @@ pub struct WaterBuffer<T> {
 }
 
 
-
+unsafe impl<T> Send for WaterBuffer<T> {}
 impl WaterBuffer<InnerType> {
     /// Converts the buffer into an owned iterator
     pub fn into_owned_iter(self) -> WaterBufferOwnedIter<InnerType> {
