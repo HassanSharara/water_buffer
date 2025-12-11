@@ -597,7 +597,7 @@ impl <T>Index<RangeFrom<usize>> for WaterBuffer<T> {
     type Output = [T];
 
     fn index(&self, idx: RangeFrom<usize>) -> &Self::Output {
-        if idx.start > self.start_pos
+        if idx.start > self.filled_data_length
         {
             panic!("Range out of bounds");
         }
@@ -637,7 +637,7 @@ impl<T> IndexMut<RangeTo<usize>> for WaterBuffer<T> {
 impl <T>IndexMut<RangeFrom<usize>> for WaterBuffer<T> {
 
     fn index_mut(&mut self, idx: RangeFrom<usize>) -> &mut Self::Output {
-        if idx.start > self.start_pos
+        if idx.start > self.filled_data_length
         {
             panic!("Range out of bounds");
         }
