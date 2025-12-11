@@ -5,7 +5,7 @@
 
 use std::alloc::{alloc, dealloc, realloc, Layout};
 use std::mem::MaybeUninit;
-use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFull};
+use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFrom, RangeFull, RangeTo};
 use std::ptr;
 #[cfg(feature = "impl_bytes")]
 use bytes::buf::UninitSlice;
@@ -585,6 +585,59 @@ impl<T> Index<Range<usize>> for WaterBuffer<T> {
         unsafe { std::slice::from_raw_parts(self.pointer.add(idx.start), idx.end - idx.start) }
     }
 }
+
+impl <T>Index<RangeFrom<usize>> for WaterBuffer<T> {
+    type Output = [T];
+
+    fn index(&self, idx: RangeFrom<usize>) -> &Self::Output {
+        if idx.start > self.start_pos
+        {
+            panic!("Range out of bounds");
+        }
+        unsafe { std::slice::from_raw_parts(self.pointer.add(idx.start), self.filled_data_length - idx.start) }
+    }
+}
+impl<T> Index<RangeTo<usize>> for WaterBuffer<T> {
+    type Output = [T];
+
+    fn index(&self, index: RangeTo<usize>) -> &Self::Output {
+        if index.end > self.filled_data_length {
+            panic!("Range out of bounds");
+        }
+        unsafe {
+            std::slice::from_raw_parts(
+                self.pointer,
+                index.end
+            )
+        }
+    }
+}
+
+impl<T> IndexMut<RangeTo<usize>> for WaterBuffer<T> {
+
+    fn index_mut(&mut self, index: RangeTo<usize>) -> &mut Self::Output {
+        if index.end > self.filled_data_length {
+            panic!("Range out of bounds");
+        }
+        unsafe {
+            std::slice::from_raw_parts_mut(
+                self.pointer,
+                index.end
+            )
+        }
+    }
+}
+impl <T>IndexMut<RangeFrom<usize>> for WaterBuffer<T> {
+
+    fn index_mut(&mut self, idx: RangeFrom<usize>) -> &mut Self::Output {
+        if idx.start > self.start_pos
+        {
+            panic!("Range out of bounds");
+        }
+        unsafe { std::slice::from_raw_parts_mut(self.pointer.add(idx.start), self.filled_data_length - idx.start) }
+    }
+}
+
 
 impl<T> IndexMut<Range<usize>> for WaterBuffer<T> {
     fn index_mut(&mut self, idx: Range<usize>) -> &mut Self::Output {
