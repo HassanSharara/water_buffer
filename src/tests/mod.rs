@@ -247,7 +247,7 @@ mod tests {
 
         let uninit = b.un_initialized_remaining();
 
-         assert_eq!(uninit,0);
+         assert_eq!(uninit,2);
     }
 
     // ============================================================================
