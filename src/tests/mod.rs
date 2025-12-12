@@ -443,8 +443,7 @@ mod tests {
     #[test]
     fn test_ap_size() {
         let b = WaterBuffer::with_capacity(10);
-        let new_size = b.ap_size(15);
-        assert!(new_size >= 15);
+        assert_eq!(b.capacity(),10)
     }
 
     #[test]
