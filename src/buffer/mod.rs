@@ -1,10 +1,11 @@
-//! # WaterBuffer - Vec-based Implementation
+//! # WaterBuffer - Ultra High-Performance Vec-based Implementation
 //!
 //! `WaterBuffer` is a high-performance dynamically-sized buffer in Rust.
-//! This version uses Vec internally for automatic memory management.
+//! This version uses Vec internally with aggressive performance optimizations.
 
 use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFrom, RangeFull, RangeTo};
+use std::ptr;
 #[cfg(feature = "impl_bytes")]
 use bytes::buf::UninitSlice;
 #[cfg(feature = "impl_bytes")]
@@ -22,17 +23,38 @@ pub struct WaterBuffer<T> {
     pub(crate) filled_data_length: usize,
 }
 
+// Branch prediction hints
+#[inline(always)]
+#[cold]
+const fn cold() {}
+
+#[inline(always)]
+fn likely(b: bool) -> bool {
+    if !b {
+        cold();
+    }
+    b
+}
+
+#[inline(always)]
+fn unlikely(b: bool) -> bool {
+    if b {
+        cold();
+    }
+    b
+}
+
 impl<T> WaterBuffer<T> {
     #[cfg(not(feature = "circular_buffer"))]
     #[inline(always)]
-    pub const fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.start_pos = 0;
         self.filled_data_length = 0;
     }
 
     #[cfg(feature = "circular_buffer")]
     #[inline(always)]
-    pub const fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.start_pos = 0;
         self.circular_position = None;
         self.filled_data_length = 0;
@@ -51,6 +73,11 @@ impl<T> WaterBuffer<T> {
     #[inline(always)]
     pub fn cap(&self) -> usize {
         self.data.capacity()
+    }
+
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.filled_data_length == 0
     }
 }
 
@@ -117,10 +144,17 @@ impl WaterBuffer<InnerType> {
     // --- Construction ---
     #[inline]
     pub fn with_capacity(cap: usize) -> WaterBuffer<InnerType> {
+        let mut data = Vec::with_capacity(cap);
+        // CRITICAL: Pre-set length to capacity to avoid reallocation issues
+        // This ensures the entire capacity is usable immediately
+        unsafe {
+            data.set_len(cap);
+        }
+
         #[cfg(feature = "circular_buffer")]
         {
             WaterBuffer {
-                data: Vec::with_capacity(cap),
+                data,
                 start_pos: 0,
                 filled_data_length: 0,
                 circular_position: None,
@@ -129,12 +163,33 @@ impl WaterBuffer<InnerType> {
 
         #[cfg(not(feature = "circular_buffer"))]
         WaterBuffer {
-            data: Vec::with_capacity(cap),
+            data,
             start_pos: 0,
             filled_data_length: 0,
         }
     }
 
+    #[inline]
+    pub fn new() -> WaterBuffer<InnerType> {
+        #[cfg(feature = "circular_buffer")]
+        {
+            WaterBuffer {
+                data: Vec::new(),
+                start_pos: 0,
+                filled_data_length: 0,
+                circular_position: None,
+            }
+        }
+
+        #[cfg(not(feature = "circular_buffer"))]
+        WaterBuffer {
+            data: Vec::new(),
+            start_pos: 0,
+            filled_data_length: 0,
+        }
+    }
+
+    // --- Compaction (zero-cost when possible) ---
     #[inline(always)]
     fn compact(&mut self) {
         if self.start_pos == 0 {
@@ -143,68 +198,85 @@ impl WaterBuffer<InnerType> {
 
         if self.filled_data_length == 0 {
             self.start_pos = 0;
-            unsafe {
-                self.data.set_len(0);
-            }
             return;
         }
 
-        // Shift data to the beginning
-        self.data.copy_within(self.start_pos..self.start_pos + self.filled_data_length, 0);
-        self.start_pos = 0;
+        // Use ptr::copy for maximum performance (allows overlapping regions)
         unsafe {
-            self.data.set_len(self.filled_data_length);
+            ptr::copy(
+                self.data.as_ptr().add(self.start_pos),
+                self.data.as_mut_ptr(),
+                self.filled_data_length,
+            );
+        }
+        self.start_pos = 0;
+    }
+
+    // --- Expansion with aggressive growth ---
+    #[inline(always)]
+    pub fn expand(&mut self, additional: usize) {
+        let current_cap = self.data.capacity();
+        let current_end = self.start_pos + self.filled_data_length;
+        let required = current_end + additional;
+
+        if required <= current_cap {
+            return;
+        }
+
+        // Compact first if beneficial
+        if self.start_pos > 0 {
+            let available_after_compact = current_cap - self.filled_data_length;
+            if available_after_compact >= additional {
+                self.compact();
+                return;
+            }
+        }
+
+        // Calculate new capacity - always at least double
+        let new_cap = required.max(current_cap * 2).max(128);
+
+        // Reserve the difference
+        let to_reserve = new_cap.saturating_sub(current_cap);
+        self.data.reserve(to_reserve);
+
+        // Update Vec length to match capacity
+        unsafe {
+            self.data.set_len(self.data.capacity());
         }
     }
 
+    // --- Optimized reserve ---
     #[inline(always)]
-    pub fn expand(&mut self, additional: usize) {
+    pub fn reserve(&mut self, additional: usize) {
         let current_end = self.start_pos + self.filled_data_length;
-        let required_capacity = current_end + additional;
+        let available = self.data.capacity().saturating_sub(current_end);
 
-        if self.data.capacity() < required_capacity {
-            self.data.reserve(required_capacity - self.data.capacity());
+        if likely(additional <= available) {
+            return;
         }
+
+        self.expand(additional);
     }
 
     #[inline(always)]
     pub fn ensure_capacity(&mut self, additional: usize) {
-
-        self.data.reserve(additional);
-        return;
-        let available = self.data.capacity() - (self.start_pos + self.filled_data_length);
-        if additional <= available {
-            return;
-        }
-
-        // Try compacting first if it would help
-        if self.start_pos > 0 && (self.data.capacity() - self.filled_data_length) >= additional {
-            self.compact();
-        } else {
-            self.expand(additional);
-        }
+        self.reserve(additional);
     }
 
-    // --- Push ---
+    // --- Push (maximum performance hot path) ---
     #[cfg(not(feature = "circular_buffer"))]
     #[inline(always)]
     pub fn push(&mut self, item: InnerType) {
         let current_end = self.start_pos + self.filled_data_length;
 
-        if current_end >= self.data.capacity() {
-            self.ensure_capacity(1);
+        if unlikely(current_end >= self.data.capacity()) {
+            self.expand(1);
         }
 
         unsafe {
-            let ptr = self.data.as_mut_ptr().add(self.start_pos + self.filled_data_length);
-            std::ptr::write(ptr, item);
+            *self.data.as_mut_ptr().add(current_end) = item;
         }
         self.filled_data_length += 1;
-
-        // Update Vec's length to match
-        unsafe {
-            self.data.set_len((self.start_pos + self.filled_data_length).max(self.data.len()));
-        }
     }
 
     #[cfg(feature = "circular_buffer")]
@@ -221,13 +293,35 @@ impl WaterBuffer<InnerType> {
             return;
         }
         unsafe {
-            let ptr = self.data.as_mut_ptr().add(self.filled_data_length);
-            std::ptr::write(ptr, item);
+            *self.data.as_mut_ptr().add(self.filled_data_length) = item;
         }
         self.filled_data_length += 1;
-        unsafe {
-            self.data.set_len(self.filled_data_length.max(self.data.len()));
+    }
+
+    // --- Extend from slice (optimized bulk copy) ---
+    #[cfg(not(feature = "circular_buffer"))]
+    #[inline(always)]
+    pub fn extend_from_slice(&mut self, slice: &[u8]) {
+        let cnt = slice.len();
+        if cnt == 0 {
+            return;
         }
+
+        let current_end = self.start_pos + self.filled_data_length;
+        let available = self.data.capacity().saturating_sub(current_end);
+
+        if unlikely(cnt > available) {
+            self.expand(cnt);
+        }
+
+        unsafe {
+            ptr::copy_nonoverlapping(
+                slice.as_ptr(),
+                self.data.as_mut_ptr().add(self.start_pos + self.filled_data_length),
+                cnt,
+            );
+        }
+        self.filled_data_length += cnt;
     }
 
     #[cfg(feature = "circular_buffer")]
@@ -257,7 +351,7 @@ impl WaterBuffer<InnerType> {
             let n_slice = &slice[..available_len];
 
             unsafe {
-                std::ptr::copy_nonoverlapping(
+                ptr::copy_nonoverlapping(
                     n_slice.as_ptr(),
                     self.data.as_mut_ptr().add(position_to_write),
                     n_slice.len()
@@ -266,9 +360,6 @@ impl WaterBuffer<InnerType> {
 
             if self.filled_data_length < cap {
                 self.filled_data_length += available_len;
-                unsafe {
-                    self.data.set_len(self.filled_data_length.max(self.data.len()));
-                }
             } else {
                 if let Some(cp) = self.circular_position.as_mut() {
                     *cp += available_len;
@@ -288,29 +379,9 @@ impl WaterBuffer<InnerType> {
         }
     }
 
-    #[cfg(not(feature = "circular_buffer"))]
+    // --- Other Methods ---
     #[inline(always)]
-    pub fn extend_from_slice(&mut self, slice: &[u8]) {
-        let additional = slice.len();
-        if additional == 0 {
-            return;
-        }
-
-        self.ensure_capacity(additional);
-
-        unsafe {
-            let write_ptr = self.data.as_mut_ptr().add(self.start_pos + self.filled_data_length);
-            std::ptr::copy_nonoverlapping(slice.as_ptr(), write_ptr, additional);
-        }
-        self.filled_data_length += additional;
-
-        unsafe {
-            self.data.set_len((self.start_pos + self.filled_data_length).max(self.data.len()));
-        }
-    }
-
-    #[inline(always)]
-    pub const fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.start_pos = 0;
         self.filled_data_length = 0;
     }
@@ -320,13 +391,16 @@ impl WaterBuffer<InnerType> {
         if n > self.filled_data_length {
             panic!("Insufficient space to advance");
         }
+
+        if n == 0 {
+            return;
+        }
+
         self.start_pos += n;
         self.filled_data_length -= n;
+
         if self.filled_data_length == 0 {
             self.reset();
-            unsafe {
-                self.data.set_len(0);
-            }
         }
     }
 
@@ -339,11 +413,8 @@ impl WaterBuffer<InnerType> {
     #[inline(always)]
     pub fn un_initialized_remaining(&self) -> usize {
         let cap = self.data.capacity();
-        let available = cap - self.start_pos;
-        if self.filled_data_length >= available {
-            return 0;
-        }
-        available - self.filled_data_length
+        let used = self.start_pos + self.filled_data_length;
+        cap.saturating_sub(used)
     }
 
     #[cfg(not(feature = "circular_buffer"))]
@@ -353,7 +424,7 @@ impl WaterBuffer<InnerType> {
             let pos = self.start_pos + self.filled_data_length;
             let cap = self.data.capacity();
             let pointer = self.data.as_mut_ptr().add(pos) as *mut MaybeUninit<T>;
-            std::slice::from_raw_parts_mut(pointer, cap - pos)
+            std::slice::from_raw_parts_mut(pointer, cap.saturating_sub(pos))
         }
     }
 
@@ -364,7 +435,7 @@ impl WaterBuffer<InnerType> {
             let pos = self.start_pos + self.filled_data_length;
             let cap = self.data.capacity();
             let pointer = self.data.as_mut_ptr().add(pos);
-            std::slice::from_raw_parts_mut(pointer, cap - pos)
+            std::slice::from_raw_parts_mut(pointer, cap.saturating_sub(pos))
         }
     }
 
@@ -379,8 +450,107 @@ impl WaterBuffer<InnerType> {
     }
 
     #[inline(always)]
-    pub const fn advance_mut(&mut self, n: usize) {
+    pub fn advance_mut(&mut self, n: usize) {
         self.filled_data_length += n;
+    }
+
+    /// Splits the buffer at the given index, returning the tail
+    #[inline]
+    pub fn split_off(&mut self, at: usize) -> WaterBuffer<InnerType> {
+        assert!(
+            at <= self.capacity(),
+            "split_off out of bounds: {:?} <= {:?}",
+            at,
+            self.capacity(),
+        );
+
+        let other_start = self.start_pos + at;
+        let other_len = self.filled_data_length.saturating_sub(at);
+
+        // Create new buffer from the split data
+        let mut other_data = Vec::with_capacity(other_len);
+        if other_len > 0 {
+            unsafe {
+                other_data.set_len(other_len);
+                ptr::copy_nonoverlapping(
+                    self.data.as_ptr().add(other_start),
+                    other_data.as_mut_ptr(),
+                    other_len
+                );
+            }
+        }
+
+        // Update self
+        self.filled_data_length = at.min(self.filled_data_length);
+
+        #[cfg(feature = "circular_buffer")]
+        {
+            WaterBuffer {
+                data: other_data,
+                start_pos: 0,
+                filled_data_length: other_len,
+                circular_position: None,
+            }
+        }
+
+        #[cfg(not(feature = "circular_buffer"))]
+        WaterBuffer {
+            data: other_data,
+            start_pos: 0,
+            filled_data_length: other_len,
+        }
+    }
+
+    /// Splits the buffer, returning the front portion
+    #[inline]
+    pub fn split_to(&mut self, at: usize) -> WaterBuffer<InnerType> {
+        assert!(
+            at <= self.len(),
+            "split_to out of bounds: {:?} <= {:?}",
+            at,
+            self.len(),
+        );
+
+        let mut front_data = Vec::with_capacity(at);
+        if at > 0 {
+            unsafe {
+                front_data.set_len(at);
+                ptr::copy_nonoverlapping(
+                    self.data.as_ptr().add(self.start_pos),
+                    front_data.as_mut_ptr(),
+                    at
+                );
+            }
+        }
+
+        // Advance self
+        self.start_pos += at;
+        self.filled_data_length -= at;
+
+        #[cfg(feature = "circular_buffer")]
+        {
+            WaterBuffer {
+                data: front_data,
+                start_pos: 0,
+                filled_data_length: at,
+                circular_position: None,
+            }
+        }
+
+        #[cfg(not(feature = "circular_buffer"))]
+        WaterBuffer {
+            data: front_data,
+            start_pos: 0,
+            filled_data_length: at,
+        }
+    }
+
+    /// Truncates the buffer to the specified length
+    #[inline]
+    pub fn truncate(&mut self, len: usize) {
+        if len < self.filled_data_length {
+            self.filled_data_length = len;
+        }
     }
 }
 
@@ -392,6 +562,12 @@ impl Into<WaterBufferOwnedIter<InnerType>> for WaterBuffer<InnerType> {
             buffer: self,
             iterator_pos: 0,
         }
+    }
+}
+
+impl Default for WaterBuffer<InnerType> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -643,5 +819,38 @@ impl<T> IndexMut<usize> for WaterBuffer<T> {
             panic!("Index out of bounds");
         }
         unsafe { &mut *self.data.as_mut_ptr().add(self.start_pos + index) }
+    }
+}
+
+impl Clone for WaterBuffer<InnerType> {
+    fn clone(&self) -> Self {
+        let mut new_data = Vec::with_capacity(self.filled_data_length);
+        if self.filled_data_length > 0 {
+            unsafe {
+                new_data.set_len(self.filled_data_length);
+                ptr::copy_nonoverlapping(
+                    self.data.as_ptr().add(self.start_pos),
+                    new_data.as_mut_ptr(),
+                    self.filled_data_length
+                );
+            }
+        }
+
+        #[cfg(feature = "circular_buffer")]
+        {
+            WaterBuffer {
+                data: new_data,
+                start_pos: 0,
+                filled_data_length: self.filled_data_length,
+                circular_position: None,
+            }
+        }
+
+        #[cfg(not(feature = "circular_buffer"))]
+        WaterBuffer {
+            data: new_data,
+            start_pos: 0,
+            filled_data_length: self.filled_data_length,
+        }
     }
 }
