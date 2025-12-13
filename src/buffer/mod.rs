@@ -333,6 +333,7 @@ impl WaterBuffer<InnerType> {
 
     #[inline(always)]
     fn compact(&mut self){
+        println!("compact {} {} {}",self.start_pos,self.filled_data_length,self.cap);
         unsafe {
             copy_nonoverlapping(
                 self.pointer.add(self.start_pos),
