@@ -1,7 +1,6 @@
 use std::time::Instant;
 use std::hint::black_box;
-use bytes::{BytesMut, BufMut, Buf};
-use dhat::Profiler;
+use bytes::{BytesMut, BufMut};
 use water_buffer::WaterBuffer;
 
 const ITERATIONS: usize = 5;

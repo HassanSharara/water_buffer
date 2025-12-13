@@ -9,7 +9,7 @@ use std::alloc::{alloc, dealloc, realloc, Layout};
 use std::mem::{self, MaybeUninit};
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFrom, RangeFull, RangeTo};
 use std::ptr;
-
+use std::ptr::copy_nonoverlapping;
 #[cfg(feature = "impl_bytes")]
 use bytes::buf::UninitSlice;
 #[cfg(feature = "impl_bytes")]
@@ -199,21 +199,141 @@ impl WaterBuffer<InnerType> {
         }
         new_cap
     }
+    //
+    // // --- Compaction ---
+    // #[inline(always)]
+    // fn compact(&mut self) {
+    //     println!("invoked ");
+    //     if self.start_pos == 0 {
+    //         return;
+    //     }
+    //
+    //     if self.filled_data_length == 0 {
+    //         self.start_pos = 0;
+    //         return;
+    //     }
+    //
+    //     unsafe {
+    //         ptr::copy(
+    //             self.pointer.add(self.start_pos),
+    //             self.pointer,
+    //             self.filled_data_length,
+    //         );
+    //     }
+    //     self.start_pos = 0;
+    // }
 
-    // --- Compaction ---
+
     #[inline(always)]
-    fn compact(&mut self) {
-        if self.start_pos == 0 {
-            return;
-        }
+    pub fn expand(&mut self, additional: usize) {
+        use std::mem::size_of;
 
-        if self.filled_data_length == 0 {
+        // If buffer is empty, allocate fresh
+        if self.cap == 0 {
+            let layout = match Layout::array::<InnerType>(additional) {
+                Ok(l) => l,
+                Err(_) => return,
+            };
+            let p = unsafe { alloc(layout) } as *mut InnerType;
+            self.pointer = p;
+            self.cap = additional;
             self.start_pos = 0;
+            self.filled_data_length = 0;
             return;
         }
 
+        // if self.start_pos > 0 {
+        //     unsafe {
+        //         ptr::copy(
+        //             self.pointer.add(self.start_pos),
+        //             self.pointer,
+        //             self.filled_data_length,
+        //         );
+        //     }
+        //     self.start_pos = 0;
+        // }
+
+        let old_cap = self.cap;
+        let old_layout = Layout::array::<InnerType>(old_cap).unwrap();
+        let new_cap = old_cap + additional;
+
+        let new_layout = Layout::array::<InnerType>(new_cap).unwrap();
+        let p = unsafe {
+
+            realloc(
+                self.pointer as *mut u8,
+                old_layout,
+                new_layout.size(),
+            )
+        } as *mut InnerType;
+
+        self.pointer = p;
+        self.cap = new_cap;
+    }
+
+    // --- Expansion (Stable with safe realloc) ---
+    // #[inline]
+    // pub fn expand(&mut self, required_capacity: usize) {
+    //     let available_capacity = self.cap - self.start_pos;
+    //     if required_capacity <= available_capacity {
+    //         return;
+    //     }
+    //
+    //     if required_capacity <= self.cap {
+    //         self.compact();
+    //         return;
+    //     }
+    //
+    //     let old_cap = self.cap;
+    //     let old_ptr = self.pointer;
+    //     let old_layout = if old_cap > 0 {
+    //         Layout::array::<InnerType>(old_cap).unwrap()
+    //     } else {
+    //         Layout::from_size_align(0, mem::align_of::<InnerType>()).unwrap()
+    //     };
+    //
+    //     let new_cap = self.calculate_new_capacity(required_capacity);
+    //
+    //     unsafe {
+    //         if self.start_pos > 0 && required_capacity <= self.cap {
+    //             self.compact();
+    //             return;
+    //         }
+    //
+    //         let new_ptr = if old_cap == 0 {
+    //             alloc(Layout::array::<InnerType>(new_cap).unwrap()) as *mut InnerType
+    //         } else {
+    //             realloc(old_ptr as *mut u8, old_layout, new_cap) as *mut InnerType
+    //         };
+    //
+    //         if new_ptr.is_null() {
+    //             panic!("Allocation failed");
+    //         }
+    //
+    //         self.pointer = new_ptr;
+    //         self.cap = new_cap;
+    //         self.start_pos = 0;
+    //     }
+    // }
+
+    // --- Capacity Check (Stable) ---
+    #[inline(always)]
+    pub fn ensure_capacity(&mut self, additional: usize) {
+        let available = self.cap - self.filled_data_length;
+        if likely(additional <= available) {
+            return;
+        }
+        if (self.start_pos + available) >= additional && self.start_pos >= self.filled_data_length{
+            self.compact();
+        } else {
+            self.expand(additional - available);
+        }
+    }
+
+    #[inline(always)]
+    fn compact(&mut self){
         unsafe {
-            ptr::copy(
+            copy_nonoverlapping(
                 self.pointer.add(self.start_pos),
                 self.pointer,
                 self.filled_data_length,
@@ -221,69 +341,6 @@ impl WaterBuffer<InnerType> {
         }
         self.start_pos = 0;
     }
-
-    // --- Expansion (Stable with safe realloc) ---
-    #[inline]
-    pub fn expand(&mut self, required_capacity: usize) {
-        let available_capacity = self.cap - self.start_pos;
-        if required_capacity <= available_capacity {
-            return;
-        }
-
-        if required_capacity <= self.cap {
-            self.compact();
-            return;
-        }
-
-        let old_cap = self.cap;
-        let old_ptr = self.pointer;
-        let old_layout = if old_cap > 0 {
-            Layout::array::<InnerType>(old_cap).unwrap()
-        } else {
-            Layout::from_size_align(0, mem::align_of::<InnerType>()).unwrap()
-        };
-
-        let new_cap = self.calculate_new_capacity(required_capacity);
-
-        unsafe {
-            // CRITICAL: Compact first if necessary, then use realloc.
-            if self.start_pos > 0 {
-                self.compact();
-            }
-
-            let new_ptr = if old_cap == 0 {
-                alloc(Layout::array::<InnerType>(new_cap).unwrap()) as *mut InnerType
-            } else {
-                realloc(old_ptr as *mut u8, old_layout, new_cap) as *mut InnerType
-            };
-
-            if new_ptr.is_null() {
-                panic!("Allocation failed");
-            }
-
-            self.pointer = new_ptr;
-            self.cap = new_cap;
-            self.start_pos = 0;
-        }
-    }
-
-    // --- Capacity Check (Stable) ---
-    #[inline(always)]
-    pub fn ensure_capacity(&mut self, additional: usize) {
-        let required = self.filled_data_length + additional;
-        let available = self.cap - self.start_pos;
-
-        if likely(required <= available) {
-            return;
-        }
-
-        if required <= self.cap {
-            self.compact();
-        } else {
-            self.expand(required);
-        }
-    }
-
     // --- Push (Stable, with original hot path) ---
     #[cfg(not(feature = "circular_buffer"))]
     #[inline(always)]
@@ -403,7 +460,7 @@ impl WaterBuffer<InnerType> {
         // After ensure_capacity, we are guaranteed to have space and start_pos = 0
         unsafe {
             let write_ptr = self.pointer.add(self.filled_data_length + self.start_pos);
-            ptr::copy_nonoverlapping(slice.as_ptr(), write_ptr as *mut u8, additional);
+            copy_nonoverlapping(slice.as_ptr(), write_ptr as *mut u8, additional);
         }
         self.filled_data_length += additional;
     }
@@ -422,6 +479,9 @@ impl WaterBuffer<InnerType> {
         }
         self.start_pos += n;
         self.filled_data_length -= n;
+        if self.filled_data_length == 0 {
+            self.reset();
+        }
     }
 
     #[inline(always)]
