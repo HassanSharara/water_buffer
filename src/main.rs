@@ -16,7 +16,7 @@ unsafe fn dos(){
 }
 fn main(){
     // unsafe {dos();}
-
+    std::alloc::Global;
     let mut b = WaterBuffer::with_capacity(20);
     b.extend_from_slice(b"Hello, world!");
     b.extend_from_slice(b"2222222222222");
