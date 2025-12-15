@@ -78,7 +78,7 @@ fn main() {
     println!("╚═══════════════════════════════════════════════════════════╝\n");
 
     let mut results = Vec::new();
-
+    const TH:usize = 100_000;
     // ============ Test 1: HTTP Request Building ============
     results.push(run_benchmark(
         "Test 1: HTTP Request Building (100K requests)",
@@ -86,7 +86,7 @@ fn main() {
             let headers = b"Content-Type: application/json\r\nAuthorization: Bearer token123\r\n";
             let body = b"{\"user\":\"test\",\"data\":\"payload\"}";
 
-            for _ in 0..100_000 {
+            for _ in 0..TH {
                 let mut buf = WaterBuffer::with_capacity(256);
                 buf.extend_from_slice(b"POST /api/endpoint HTTP/1.1\r\n");
                 buf.extend_from_slice(headers);
@@ -101,7 +101,7 @@ fn main() {
             let headers = b"Content-Type: application/json\r\nAuthorization: Bearer token123\r\n";
             let body = b"{\"user\":\"test\",\"data\":\"payload\"}";
 
-            for _ in 0..100_000 {
+            for _ in 0..TH {
                 let mut buf = BytesMut::with_capacity(256);
                 buf.extend_from_slice(b"POST /api/endpoint HTTP/1.1\r\n");
                 buf.extend_from_slice(headers);

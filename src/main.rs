@@ -1,22 +1,17 @@
-use bytes::{Buf, BytesMut};
+use bytes::Buf;
+// use bytes::{Buf, BytesMut};
 use water_buffer::WaterBuffer;
 
-unsafe fn dos(){
 
-    let layout = std::alloc::Layout::array::<u8>(10).unwrap();
-    let p =unsafe{ std::alloc::alloc(layout)};
-    for i in 0..10 {
-        *p.add(i) = i as u8;
-    }
-    for i in 0..10 {
-        let po = p.add(i);
-        println!("{:?}",* po);
-    }
-
-}
 fn main(){
+
+    let mut b = bytes::BytesMut::with_capacity(10);
+    b.extend_from_slice(b"12");
+    b.advance(1);
+    println!("called {}",b.capacity());
+    return;
     // unsafe {dos();}
-    std::alloc::Global;
+    // std::alloc::Global;
     let mut b = WaterBuffer::with_capacity(20);
     b.extend_from_slice(b"Hello, world!");
     b.extend_from_slice(b"2222222222222");
