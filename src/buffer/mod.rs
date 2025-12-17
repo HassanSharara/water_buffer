@@ -5,7 +5,7 @@
 //! It provides safe memory management, dynamic resizing, iteration, and indexing.
 
 use std::alloc::{alloc, dealloc, realloc, Layout};
-use std::ops::{Add, Deref, DerefMut, Index, IndexMut, Range, RangeFull};
+use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFull};
 use std::ptr;
 
 
@@ -102,7 +102,7 @@ impl WaterBuffer<InnerType> {
             return additional;
         }
         let needed = self.filled_data_length + additional;
-        let cap = self.cap * 3 ;
+        let cap = self.cap * 2 ;
         if cap > needed { return cap}
         needed
     }
