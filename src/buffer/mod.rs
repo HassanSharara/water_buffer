@@ -24,6 +24,7 @@ pub struct WaterBuffer<T> {
 }
 
 unsafe impl Send for WaterBuffer<*mut u8> {}
+unsafe impl Send for WaterBuffer<u8> {}
 
 
 impl WaterBuffer<InnerType> {
