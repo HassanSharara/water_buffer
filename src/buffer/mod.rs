@@ -16,6 +16,7 @@ use bytes::BufMut;
 
 type InnerType = u8;
 
+#[derive(Debug)]
 /// Main dynamic buffer struct
 pub struct WaterBuffer<T> {
     pub (crate) cap: usize,
