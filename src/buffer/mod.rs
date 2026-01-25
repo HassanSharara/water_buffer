@@ -7,7 +7,8 @@
 use std::alloc::{alloc, dealloc, realloc, Layout};
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFull};
 use std::ptr;
-
+use bytes::buf::UninitSlice;
+use bytes::BufMut;
 
 
 type InnerType = u8;
@@ -457,6 +458,37 @@ impl WaterBuffer<InnerType> {
 
 }
 
+#[cfg(feature = "bytes")]
+unsafe impl <T> BufMut for WaterBuffer<T>{
+    #[inline]
+    fn remaining_mut(&self) -> usize {
+        // How many bytes can still be written
+        self.un_initialized_remaining()
+    }
+
+    #[inline]
+    unsafe fn advance_mut(&mut self, cnt: usize) {
+        // SAFETY: caller guarantees cnt <= remaining_mut()
+        self.filled_data_length += cnt;
+    }
+
+    #[inline]
+    fn chunk_mut(&mut self) -> &mut UninitSlice {
+        // Pointer to where new data should be written
+        let write_pos = self.start_pos + self.filled_data_length;
+
+        if write_pos >= self.cap {
+            return UninitSlice::empty();
+        }
+
+        let len = self.cap - write_pos;
+
+        unsafe {
+            let ptr = self.pointer.add(write_pos);
+            UninitSlice::from_raw_parts_mut(ptr, len)
+        }
+    }
+}
 impl Into<WaterBufferOwnedIter<InnerType>> for WaterBuffer<InnerType> {
     fn into(self) -> WaterBufferOwnedIter<InnerType> {
         WaterBufferOwnedIter {
