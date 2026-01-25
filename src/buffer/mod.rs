@@ -7,7 +7,9 @@
 use std::alloc::{alloc, dealloc, realloc, Layout};
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFull};
 use std::ptr;
+#[cfg(feature = "bytes")]
 use bytes::buf::UninitSlice;
+#[cfg(feature = "bytes")]
 use bytes::BufMut;
 
 
@@ -478,7 +480,7 @@ unsafe impl  BufMut for WaterBuffer<InnerType>{
         let write_pos = self.start_pos + self.filled_data_length;
 
         if write_pos >= self.cap {
-            return UninitSlice::empty();
+            return UninitSlice::new(&mut []);
         }
 
         let len = self.cap - write_pos;
