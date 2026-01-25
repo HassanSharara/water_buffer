@@ -451,7 +451,7 @@ impl WaterBuffer<InnerType> {
     #[cfg(not(feature = "circular_buffer"))]
 
     #[inline(always)]
-    pub const fn chunk(&mut self) -> &[u8] {
+    pub const fn chunk(&self) -> &[u8] {
         unsafe {
             let pos = self.start_pos ;
             let pointer = self.pointer.add(pos);
