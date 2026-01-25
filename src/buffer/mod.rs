@@ -5,7 +5,8 @@
 //! It provides safe memory management, dynamic resizing, iteration, and indexing.
 
 use std::alloc::{alloc, dealloc, realloc, Layout};
-use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFull};
+use std::mem::MaybeUninit;
+use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFrom, RangeFull, RangeTo};
 use std::ptr;
 #[cfg(feature = "bytes")]
 use bytes::buf::UninitSlice;
@@ -41,6 +42,15 @@ impl WaterBuffer<InnerType> {
         WaterBufferIter {
             buffer: self,
             pos: 0,
+        }
+    }
+
+
+    pub fn spare_capacity_mut(&mut self)->&mut [MaybeUninit<u8>]{
+        unsafe {
+            let pos = self.start_pos + self.filled_data_length;
+            let pointer = self.pointer.add(pos);
+            std::slice::from_raw_parts_mut(pointer as *mut MaybeUninit<u8>, self.cap - pos)
         }
     }
 
@@ -521,6 +531,7 @@ pub struct WaterBufferOwnedIter<InnerType> {
 impl Iterator for WaterBufferOwnedIter<InnerType> {
     type Item = InnerType;
 
+
     fn next(&mut self) -> Option<Self::Item> {
         if self.iterator_pos >= self.buffer.cap.min(self.buffer.filled_data_length)
         {
@@ -589,6 +600,57 @@ impl<'a> Iterator for WaterBufferIterMut<'a> {
         Some(item)
     }
 }
+impl<T> Index<RangeFrom<usize>> for WaterBuffer<T> {
+    type Output = [T];
+
+    fn index(&self, idx: RangeFrom<usize>) -> &Self::Output {
+        if idx.start > self.filled_data_length
+        {
+            panic!("Range out of bounds");
+        }
+        unsafe { std::slice::from_raw_parts(
+            self.pointer.add(self.start_pos + idx.start ),
+            self.filled_data_length)
+        }
+    }
+}
+impl<T> IndexMut<RangeFrom<usize>> for WaterBuffer<T> {
+    fn index_mut(&mut self, idx: RangeFrom<usize>) -> &mut Self::Output {
+        if idx.start > self.filled_data_length
+        {
+            panic!("Range out of bounds");
+        }
+        unsafe { std::slice::from_raw_parts_mut(
+            self.pointer.add(self.start_pos + idx.start ),
+            self.filled_data_length)
+        }
+    }
+}impl<T> IndexMut<RangeTo<usize>> for WaterBuffer<T> {
+    fn index_mut(&mut self, idx: RangeTo<usize>) -> &mut Self::Output {
+        if idx.end > self.filled_data_length
+        {
+            panic!("Range out of bounds");
+        }
+        unsafe { std::slice::from_raw_parts_mut(
+            self.pointer.add(self.start_pos  ),
+            idx.end)
+        }
+    }
+}
+impl<T> Index<RangeTo<usize>> for WaterBuffer<T> {
+    type Output = [T];
+
+    fn index(&self, idx: RangeTo<usize>) -> &Self::Output {
+        if idx.end > self.filled_data_length
+        {
+            panic!("Range out of bounds");
+        }
+        unsafe { std::slice::from_raw_parts(
+            self.pointer.add(self.start_pos  ),
+            idx.end)
+        }
+    }
+}
 
 /// Indexing implementations
 impl<T> Index<Range<usize>> for WaterBuffer<T> {
@@ -599,7 +661,8 @@ impl<T> Index<Range<usize>> for WaterBuffer<T> {
         {
             panic!("Range out of bounds");
         }
-        unsafe { std::slice::from_raw_parts(self.pointer.add(idx.start), idx.end - idx.start) }
+        unsafe { std::slice::from_raw_parts(self.pointer.add(self.start_pos + idx.start),
+                                            self.start_pos + idx.end) }
     }
 }
 
@@ -609,7 +672,8 @@ impl<T> IndexMut<Range<usize>> for WaterBuffer<T> {
         {
             panic!("Range out of bounds");
         }
-        unsafe { std::slice::from_raw_parts_mut(self.pointer.add(idx.start), idx.end - idx.start) }
+        unsafe { std::slice::from_raw_parts_mut(self.pointer.add(
+            self.start_pos + idx.start), idx.end + self.start_pos) }
     }
 }
 
