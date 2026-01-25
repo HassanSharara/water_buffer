@@ -459,7 +459,7 @@ impl WaterBuffer<InnerType> {
 }
 
 #[cfg(feature = "bytes")]
-unsafe impl <T> BufMut for WaterBuffer<T>{
+unsafe impl  BufMut for WaterBuffer<InnerType>{
     #[inline]
     fn remaining_mut(&self) -> usize {
         // How many bytes can still be written
