@@ -65,12 +65,10 @@ impl WaterBuffer<InnerType> {
         }
     }
 
+
+
     #[inline(always)]
     pub const fn capacity(&self)->usize{
-        #[cfg(feature = "dev")]
-        {
-            println!("self.cap is {} while filled_data_length {}",self.cap ,self.filled_data_length);
-        }
         self.cap - self.filled_data_length
     }
 
