@@ -788,7 +788,7 @@ unsafe impl IoBuf for WaterBuffer<u8> {
 
     fn bytes_total(&self) -> usize {
         // The total capacity relative to the current start_pos
-        self.cap - self.start_pos
+        self.capacity()
     }
 }
 #[cfg(feature = "uring")]
