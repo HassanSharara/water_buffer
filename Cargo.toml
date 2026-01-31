@@ -1,6 +1,6 @@
 [package]
 name = "water_buffer"
-version = "1.2.2-Beta.18"
+version = "1.2.2-Beta.20"
 edition = "2024"
 authors = ["HassanSharara"]
 repository = "https://github.com/HassanSharara/water_buffer"
@@ -21,6 +21,7 @@ bytes = "1.11.0"
 circular_buffer = []
 bytes = ["dep:bytes"]
 uring = ["dep:tokio-uring"]
+unsafe_clone = []
 
 [dependencies]
 bytes = { version = "1.11.0", optional = true }

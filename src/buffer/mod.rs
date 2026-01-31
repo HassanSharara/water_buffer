@@ -26,20 +26,28 @@ pub struct WaterBuffer<T> {
     #[cfg(feature = "circular_buffer")]
     pub (crate) circular_position:Option<usize>,
     pub (crate) pointer: *mut T,
-    pub (crate) destroy:bool,
+    #[cfg(feature = "unsafe_clone")]
+    pub (crate) original:Option<*mut WaterBuffer<T>>,
     pub (crate) filled_data_length
     : usize,
 }
 
+
+#[cfg(feature = "unsafe_clone")]
 impl  WaterBuffer<InnerType> {
-    /// it's returning the same class but without destructing data so you need to keep the real original struct alive
+    /// it's returning the same class but without destructing data ,so you need to keep the real original struct alive
+    /// and never insert new data through the new one
     pub unsafe fn unsafe_clone(&self) -> Self {
-        WaterBuffer {
+        let original = match self.original {
+            None => {self as *const WaterBuffer<InnerType> as  *mut WaterBuffer<InnerType>}
+            Some(e) => {e}
+        };
+        return  WaterBuffer {
             cap:self.cap,
             pointer:self.pointer,
             start_pos:self.start_pos,
             filled_data_length:self.filled_data_length,
-            destroy:false
+            original:Some(original)
         }
     }
 }
@@ -102,14 +110,29 @@ impl WaterBuffer<InnerType> {
             };
         };
 
-        #[cfg(not(feature = "circular_buffer"))]
-        WaterBuffer {
-            cap,
-            pointer: first_element_pointer,
-            start_pos: 0,
-            destroy:true,
-            filled_data_length
-            : 0,
+        #[cfg(all(not(feature = "circular_buffer")))]
+        {
+            #[cfg(feature = "unsafe_clone")]
+            {
+                return   WaterBuffer {
+                    cap,
+                    pointer: first_element_pointer,
+                    start_pos: 0,
+                    filled_data_length
+                    : 0,
+                    original:None
+                }
+            }
+            #[cfg(not(feature = "unsafe_clone"))]
+            {
+                return   WaterBuffer {
+                    cap,
+                    pointer: first_element_pointer,
+                    start_pos: 0,
+                    filled_data_length
+                    : 0,
+                }
+            }
         }
     }
 
@@ -545,7 +568,20 @@ impl Into<WaterBufferOwnedIter<InnerType>> for WaterBuffer<InnerType> {
 /// Drop implementation to free memory
 impl<T> Drop for WaterBuffer<T> {
     fn drop(&mut self) {
-        if !self.destroy {return}
+       #[cfg(feature = "unsafe_clone")]
+       {
+           match self.original {
+               None => {}
+               Some(e) => {
+                   let e = unsafe {&mut *e};
+                   e.cap = self.cap;
+                   e.pointer = self.pointer;
+                   e.start_pos = self.start_pos;
+                   e.filled_data_length = self.filled_data_length;
+                   return
+               }
+           }
+       }
         if !self.pointer.is_null() && self.cap > 0 {
             let layout = Layout::array::<T>(self.cap).unwrap();
             unsafe {
