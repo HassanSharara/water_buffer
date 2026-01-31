@@ -288,14 +288,11 @@ impl WaterBuffer<InnerType> {
     pub const fn available(&self)->usize{
         self.cap - self.filled_data_length
     }
-    #[cfg(not(feature = "circular_buffer"))]
-    /// Extends the buffer from a slice
+
+
     #[inline(always)]
-    pub fn extend_from_slice(&mut self, slice: &[u8]) {
-
-
+    const fn reserve(&mut self,len:usize){
         let raw_available = self.cap - (self.start_pos + self.filled_data_length);
-        let len  = slice.len();
         if raw_available < len {
             if  self.start_pos >= self.filled_data_length && self.available() >= len {
                 self.shift_data();
@@ -303,16 +300,21 @@ impl WaterBuffer<InnerType> {
                 self.expand(self.ap_size(len));
             }
         }
-
-
+    }
+    #[cfg(not(feature = "circular_buffer"))]
+    /// Extends the buffer from a slice
+    #[inline(always)]
+    pub fn extend_from_slice(&mut self, slice: &[u8]) {
+        let len  = slice.len();
+        self.reserve(len);
         unsafe {
             ptr::copy_nonoverlapping(
                 slice.as_ptr(),
                 self.pointer.add(self.start_pos + self.filled_data_length) as *mut u8,
-                slice.len(),
+                len,
             )
         };
-        self.filled_data_length += slice.len();
+        self.filled_data_length += len;
     }
 
     /// Returns the number of elements in the buffer
