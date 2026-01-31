@@ -1,6 +1,6 @@
 [package]
 name = "water_buffer"
-version = "1.2.2-Beta.9"
+version = "1.2.2-Beta.10"
 edition = "2024"
 authors = ["HassanSharara"]
 repository = "https://github.com/HassanSharara/water_buffer"

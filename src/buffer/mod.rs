@@ -103,7 +103,7 @@ impl WaterBuffer<InnerType> {
         let new_pointer = unsafe {
             realloc(
                 self.pointer as *mut u8,
-                Layout::array::<InnerType>(self.cap).unwrap(),
+                Layout::array::<InnerType>(n).unwrap(),
                 n,
             )
         } as *mut InnerType;
