@@ -103,13 +103,10 @@ impl WaterBuffer<InnerType> {
         let new_pointer = unsafe {
             realloc(
                 self.pointer as *mut u8,
-                Layout::array::<InnerType>(n).unwrap(),
+                Layout::array::<InnerType>(self.cap).unwrap(),
                 n,
             )
         } as *mut InnerType;
-        if new_pointer.is_null() {
-            panic!("Out of memory");
-        }
         self.pointer = new_pointer;
         self.cap = n;
     }
