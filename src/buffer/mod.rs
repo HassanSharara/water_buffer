@@ -26,8 +26,22 @@ pub struct WaterBuffer<T> {
     #[cfg(feature = "circular_buffer")]
     pub (crate) circular_position:Option<usize>,
     pub (crate) pointer: *mut T,
+    pub (crate) destroy:bool,
     pub (crate) filled_data_length
     : usize,
+}
+
+impl  WaterBuffer<InnerType> {
+    /// it's returning the same class but without destructing data so you need to keep the real original struct alive
+    pub unsafe fn unsafe_clone(&self) -> Self {
+        WaterBuffer {
+            cap:self.cap,
+            pointer:self.pointer,
+            start_pos:self.start_pos,
+            filled_data_length:self.filled_data_length,
+            destroy:false
+        }
+    }
 }
 
 unsafe impl Send for WaterBuffer<*mut u8> {}
@@ -93,6 +107,7 @@ impl WaterBuffer<InnerType> {
             cap,
             pointer: first_element_pointer,
             start_pos: 0,
+            destroy:true,
             filled_data_length
             : 0,
         }
@@ -530,6 +545,7 @@ impl Into<WaterBufferOwnedIter<InnerType>> for WaterBuffer<InnerType> {
 /// Drop implementation to free memory
 impl<T> Drop for WaterBuffer<T> {
     fn drop(&mut self) {
+        if !self.destroy {return}
         if !self.pointer.is_null() && self.cap > 0 {
             let layout = Layout::array::<T>(self.cap).unwrap();
             unsafe {
@@ -808,33 +824,3 @@ unsafe impl IoBufMut for WaterBuffer<u8> {
     }
 }
 
-
-#[cfg(feature = "uring")]
-unsafe impl IoBuf for &'_ mut  WaterBuffer<u8> {
-    fn stable_ptr(&self) -> *const u8 {
-        // We use the start_pos to ensure we point to the beginning of valid data
-        unsafe { self.pointer.add(self.start_pos) }
-    }
-
-    fn bytes_init(&self) -> usize {
-        self.filled_data_length
-    }
-
-    fn bytes_total(&self) -> usize {
-        // The total capacity relative to the current start_pos
-        self.capacity()
-    }
-}
-#[cfg(feature = "uring")]
-// IoBufMut for writing data INTO the buffer (reading from a socket)
-unsafe impl IoBufMut for &'_ mut WaterBuffer<u8> {
-    fn stable_mut_ptr(&mut self) -> *mut u8 {
-        // Kernel writes starting after the already filled data
-        unsafe { self.pointer.add(self.start_pos + self.filled_data_length) }
-    }
-
-    unsafe fn set_init(&mut self, pos: usize) {
-        // After kernel writes 'pos' bytes, we update our internal counter
-        self.filled_data_length += pos;
-    }
-}
