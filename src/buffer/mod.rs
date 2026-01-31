@@ -807,3 +807,34 @@ unsafe impl IoBufMut for WaterBuffer<u8> {
         self.filled_data_length += pos;
     }
 }
+
+
+#[cfg(feature = "uring")]
+unsafe impl IoBuf for &'_ mut  WaterBuffer<u8> {
+    fn stable_ptr(&self) -> *const u8 {
+        // We use the start_pos to ensure we point to the beginning of valid data
+        unsafe { self.pointer.add(self.start_pos) }
+    }
+
+    fn bytes_init(&self) -> usize {
+        self.filled_data_length
+    }
+
+    fn bytes_total(&self) -> usize {
+        // The total capacity relative to the current start_pos
+        self.capacity()
+    }
+}
+#[cfg(feature = "uring")]
+// IoBufMut for writing data INTO the buffer (reading from a socket)
+unsafe impl IoBufMut for &'_ mut WaterBuffer<u8> {
+    fn stable_mut_ptr(&mut self) -> *mut u8 {
+        // Kernel writes starting after the already filled data
+        unsafe { self.pointer.add(self.start_pos + self.filled_data_length) }
+    }
+
+    unsafe fn set_init(&mut self, pos: usize) {
+        // After kernel writes 'pos' bytes, we update our internal counter
+        self.filled_data_length += pos;
+    }
+}
