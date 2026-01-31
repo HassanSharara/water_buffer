@@ -107,6 +107,9 @@ impl WaterBuffer<InnerType> {
                 n,
             )
         } as *mut InnerType;
+        if new_pointer.is_null() {
+            panic!("Out of memory");
+        }
         self.pointer = new_pointer;
         self.cap = n;
     }
