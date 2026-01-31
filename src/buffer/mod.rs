@@ -291,7 +291,7 @@ impl WaterBuffer<InnerType> {
 
 
     #[inline(always)]
-    const fn reserve(&mut self,len:usize){
+    pub fn reserve(&mut self,len:usize){
         let raw_available = self.cap - (self.start_pos + self.filled_data_length);
         if raw_available < len {
             if  self.start_pos >= self.filled_data_length && self.available() >= len {
