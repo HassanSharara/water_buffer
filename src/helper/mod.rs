@@ -1,5 +1,7 @@
 use tokio_uring::buf::IoBuf;
 
+
+/// unsafe BytesSlice Wrapper for Sending bytes safely to tokio uring api
 pub struct BytesSliceWrapper {
     bytes:*const u8,
     len:usize,
@@ -7,6 +9,7 @@ pub struct BytesSliceWrapper {
 
 impl BytesSliceWrapper {
 
+    /// creating new BytesSliceWrapper from ref [[u8]]
     pub fn new(bytes:&[u8])->BytesSliceWrapper{
         let d = unsafe {bytes.as_ptr()};
         BytesSliceWrapper {
