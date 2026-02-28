@@ -333,7 +333,7 @@ impl WaterBuffer<InnerType> {
         if self.is_empty() {
             self.clear();
         }
-        if len < self.remaining_mut() {
+        if len < self.mut_len() {
             return
         }
         let raw_available = self.cap - (self.start_pos + self.filled_data_length);
@@ -485,6 +485,11 @@ impl WaterBuffer<InnerType> {
     pub const fn un_initialized_remaining(&self) -> usize {
         self.cap - self.filled_data_length
 
+    }
+
+    /// for getting the actual remaining space
+    pub const fn mut_len(&self)->usize{
+        self.cap - (self.start_pos + self.filled_data_length )
     }
 
 
