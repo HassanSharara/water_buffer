@@ -333,6 +333,9 @@ impl WaterBuffer<InnerType> {
         if self.is_empty() {
             self.clear();
         }
+        if len < self.remaining_mut() {
+            return
+        }
         let raw_available = self.cap - (self.start_pos + self.filled_data_length);
         if raw_available < len {
             if  self.start_pos >= self.filled_data_length && self.available() >= len {
