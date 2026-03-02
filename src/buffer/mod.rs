@@ -88,7 +88,13 @@ impl WaterBuffer<InnerType> {
     }
 
 
+    /// returning the full capacity of  buffer
+    #[inline]
+    pub const fn cap(&self)->usize{
+        self.cap()
+    }
 
+    /// returning the remaining capacity of buffer
     #[inline(always)]
     pub const fn capacity(&self)->usize{
         self.cap - self.filled_data_length
