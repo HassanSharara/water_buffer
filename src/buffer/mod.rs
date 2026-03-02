@@ -91,7 +91,7 @@ impl WaterBuffer<InnerType> {
     /// returning the full capacity of  buffer
     #[inline]
     pub const fn cap(&self)->usize{
-        self.cap()
+        self.cap
     }
 
     /// returning the remaining capacity of buffer
@@ -144,17 +144,22 @@ impl WaterBuffer<InnerType> {
 
     /// Expands the buffer to a new capacity
     #[inline(always)]
-    pub fn expand(&mut self,mut n: usize) {
-        n += self.cap;
-        let new_pointer = unsafe {
-            realloc(
-                self.pointer as *mut u8,
-                Layout::array::<InnerType>(self.cap).unwrap(),
-                n,
-            )
-        } as *mut InnerType;
-        self.pointer = new_pointer;
-        self.cap = n;
+    pub fn expand(&mut self, mut additional: usize) {
+        let new_cap = self.cap + additional;
+        let old_layout = Layout::array::<InnerType>(self.cap).unwrap();
+        let new_size = new_cap * std::mem::size_of::<InnerType>();
+
+        unsafe {
+            let new_ptr = realloc(self.pointer as *mut u8, old_layout, new_size);
+
+            if new_ptr.is_null() {
+                // Handle OOM (Out of Memory) gracefully
+                panic!("Failed to reallocate WaterBuffer: Out of memory");
+            }
+
+            self.pointer = new_ptr as *mut InnerType;
+            self.cap = new_cap;
+        }
     }
 
     #[cfg(not(feature = "circular_buffer"))]
