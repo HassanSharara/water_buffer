@@ -1,4 +1,5 @@
-
+## 1.2.9
+- adding truncate function to the buffer
 ## 1.0.1
 - adding support for circular buffer using circular_buffer feature
 - adding many required functions help working with buffer

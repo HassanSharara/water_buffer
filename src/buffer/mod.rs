@@ -166,16 +166,38 @@ impl WaterBuffer<InnerType> {
     /// Calculates an appropriate size for buffer growth
     #[inline(always)]
     pub(crate) const fn ap_size(&self, additional: usize) -> usize {
-        if self.cap == 0 {
-            if additional < 64 {return 64}
-            return additional;
-        }
         let needed = self.filled_data_length + additional;
-        let cap = self.cap * 2 ;
-        if cap > needed { return cap}
-        needed
+        if self.cap == 0 {
+            return if additional < 64 { 64 } else { additional };
+        }
+        let mut new_cap = self.cap * 2;
+        if self.cap > 1024 * 1024 {
+            new_cap = self.cap + (256 * 1024);
+        }
+
+        if new_cap > needed { new_cap } else { needed }
     }
 
+
+    /// Deletes the last `n` bytes from the buffer.
+    /// If `n` is greater than the current length, the buffer is cleared.
+    pub fn truncate_last(&mut self, n: usize) {
+        if n >= self.filled_data_length {
+            self.filled_data_length = 0;
+            // Optionally reset start_pos if you want to reuse the full capacity immediately
+            // self.start_pos = 0;
+        } else {
+            self.filled_data_length -= n;
+        }
+    }
+
+    /// Shortens the buffer, keeping the first `len` bytes and dropping the rest.
+    /// If `len` is greater than the current length, this has no effect.
+    pub fn truncate(&mut self, len: usize) {
+        if len < self.filled_data_length {
+            self.filled_data_length = len;
+        }
+    }
     #[cfg(feature = "circular_buffer")]
     /// Extends the buffer from a slice
     #[inline(always)]
